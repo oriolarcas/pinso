@@ -37,4 +37,21 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
     }
+
+    fun restore(events: List<Event>) {
+        Food.replay(events)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("events", null, null)
+            events.forEach { event ->
+                db.insertOrThrow("events", null, ContentValues().apply {
+                    put("id", event.id); put("bowl", event.bowl.name); put("action", event.action.name)
+                    put("time", event.time); put("measured", event.measured)
+                    put("added", event.added); put("note", event.note)
+                })
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+    }
 }

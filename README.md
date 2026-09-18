@@ -22,4 +22,10 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`. Install with `adb install -r a
 - Entries have editable timestamps and optional notes. History supports editing/deleting and recalculates subsequent entries. Changes that would produce negative consumption are rejected; log missing additions first.
 - Insights attribute estimated consumption to the measurement timestamp, not the unknown time food was actually eaten. Evaporation and spills can affect estimates.
 
-Data is stored locally in SQLite, with no account, network permission, or cloud backup. Uninstalling clears the data. The first version has two fixed bowls. Initial bowl amounts are entered with Add. The UI uses native Android views; charts, custom bowls, export, and reminders are not yet included.
+Data is stored locally in SQLite, with no account, network permission, or automatic cloud backup. Uninstalling clears the data. The first version has two fixed bowls. Initial bowl amounts are entered with Add. The UI uses native Android views; charts, custom bowls, and reminders are not yet included.
+
+## Backups
+
+Use **Backups** at the top of any screen to export a JSON file through Android's file picker, or import a previously exported file. Backups preserve both bowls, entry IDs, exact weights, timestamps, actions, and notes. You can choose local storage or a cloud document provider installed on your phone. Files are unencrypted.
+
+Import validates the file and recalculates its history before asking for confirmation. It **replaces**, rather than merges, all current entries, including when importing an empty backup. The database replacement is transactional: a failed restore rolls back to the previous data. Export before importing if you want to retain your current history. Format version 1 supports files up to 16 MB.

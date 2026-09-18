@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.os.Bundle
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -26,6 +27,7 @@ class MainActivity : Activity() {
     private val green = Color.rgb(56, 103, 80)
     private val backgroundColor = Color.rgb(247, 247, 240)
     private var rows = emptyList<Pair<Event, Result>>()
+    private var backupProgress: AlertDialog? = null
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -38,7 +40,7 @@ class MainActivity : Activity() {
         outState.putString("page", page); outState.putString("filter", filter?.name)
         super.onSaveInstanceState(outState)
     }
-    override fun onDestroy() { store.close(); super.onDestroy() }
+    override fun onDestroy() { backupProgress?.dismiss(); store.close(); super.onDestroy() }
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     private fun text(value: String, size: Float = 16f, color: Int = ink, bold: Boolean = false) = TextView(this).apply {
         text = value; textSize = size; setTextColor(color)
@@ -68,7 +70,7 @@ class MainActivity : Activity() {
             insets
         }
         val header = column().apply { setPadding(dp(24), dp(12), dp(24), dp(8)) }
-        header.addView(text("PINSO", 13f, green, true))
+        horizontal(header, text("PINSO", 13f, green, true), button("Backups") { backups() })
         header.addView(text(when(page) { "History" -> "Every little bite"; "Insights" -> "Food at a glance"; else -> "Your cat’s bowls" }, 30f, ink, true))
         header.addView(text(when(page) { "History" -> "Measurements, meals, and fresh starts."; "Insights" -> "Separate bowls. A clearer picture."; else -> "A little care, one meal at a time." }, 15f, muted))
         root.addView(header)
@@ -137,6 +139,64 @@ class MainActivity : Activity() {
     }
     private fun date(time: Long) = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(java.util.Date(time))
     private fun problem(message: String) { AlertDialog.Builder(this).setTitle("Check this entry").setMessage(message).setPositiveButton("OK", null).show() }
+    private fun backups() {
+        AlertDialog.Builder(this).setTitle("Backups")
+            .setItems(arrayOf("Export backup…", "Import backup…")) { _, which ->
+                try {
+                    if (which == 0) startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_TITLE, "pinso-${java.time.LocalDate.now()}.json")
+                    }, 101)
+                    else startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+                    }, 102)
+                } catch (_: android.content.ActivityNotFoundException) { problem("No file picker is available on this device.") }
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (resultCode != RESULT_OK || requestCode !in listOf(101, 102)) return
+        val uri = data?.data ?: return
+        if (requestCode == 101) backupWork("Exporting backup…", {
+            val json = FoodStore(applicationContext).use { Backup.encode(it.events()) }
+            val output = contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the selected file.")
+            output.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+        }) { Toast.makeText(this, "Backup exported", Toast.LENGTH_LONG).show() }
+        else backupWork("Reading backup…", {
+            val input = contentResolver.openInputStream(uri) ?: error("Cannot read the selected file.")
+            input.use(Backup::read)
+        }) { entries ->
+            AlertDialog.Builder(this).setTitle("Replace all food history?")
+                .setMessage("This backup contains ${entries.size} entries. Importing will replace all ${store.events().size} current entries in both bowls. Export a backup first if you want to keep them. This cannot be undone.")
+                .setNegativeButton("Cancel", null).setPositiveButton("Replace and import") { _, _ ->
+                    backupWork("Importing backup…", {
+                        FoodStore(applicationContext).use { it.restore(entries) }
+                    }) { render(); Toast.makeText(this, "Imported ${entries.size} entries", Toast.LENGTH_LONG).show() }
+                }.show()
+        }
+    }
+
+    private fun <T> backupWork(message: String, work: () -> T, done: (T) -> Unit) {
+        val progress = AlertDialog.Builder(this).setMessage(message).setCancelable(false).create()
+        backupProgress = progress
+        progress.show()
+        Thread {
+            val result = runCatching(work)
+            runOnUiThread {
+                if (!isDestroyed && !isFinishing) {
+                    progress.dismiss()
+                    backupProgress = null
+                    result.fold(done) { error ->
+                        AlertDialog.Builder(this).setTitle("Backup failed")
+                            .setMessage(error.message ?: "Could not access the backup file. Please try again.")
+                            .setPositiveButton("OK", null).show()
+                    }
+                }
+            }
+        }.start()
+    }
     private fun form(bowl: Bowl, action: Action, existing: Event? = null) {
         var timestamp = existing?.time ?: System.currentTimeMillis()
         var refreshPreview: () -> Unit = {}
