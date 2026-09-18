@@ -15,4 +15,4 @@ data class CatWeight(val id: Long = 0, val time: Long, val method: WeightMethod,
     }
 }
 
-data class BackupData(val events: List<Event>, val weights: List<CatWeight>)
+data class BackupData(val events: List<Event>, val weights: List<CatWeight>, val foodGoals: FoodGoals? = null)

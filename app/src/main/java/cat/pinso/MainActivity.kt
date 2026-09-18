@@ -132,6 +132,7 @@ class MainActivity : Activity() {
         val weekStart = Calendar.getInstance().apply { timeInMillis = start; add(Calendar.DAY_OF_YEAR, -6) }.timeInMillis
         listOf("Today" to start, "Last 7 days" to weekStart, "All time" to 0L).forEach { (title, since) ->
             val panel = card(); panel.addView(text(title, 23f, ink, true))
+            if (title == "Today") dailyGoal(panel, start)
             Bowl.entries.forEach { bowl ->
                 val entries = rows.filter { it.first.bowl == bowl && it.first.time >= since }
                 panel.addView(text(bowl.title, 17f, green, true))
@@ -141,6 +142,72 @@ class MainActivity : Activity() {
             content.addView(panel)
         }
         content.addView(text("Consumption is an estimate from weight differences, recorded at measurement time. It may include spills or moisture loss, and may span more than one day.", 14f, muted))
+    }
+    private fun percent(fraction: Double) = java.text.NumberFormat.getPercentInstance().apply {
+        maximumFractionDigits = 1
+    }.format(fraction)
+
+    private fun dailyGoal(panel: LinearLayout, start: Long) {
+        val goals = store.goals()
+        panel.addView(text("Daily food goal", 19f, ink, true))
+        if (goals == null) {
+            panel.addView(text("Set each food’s full daily allowance to see combined progress.", 15f, muted))
+        } else {
+            val end = Calendar.getInstance().apply { timeInMillis = start; add(Calendar.DAY_OF_YEAR, 1) }.timeInMillis
+            val today = rows.filter { it.first.time >= start && it.first.time < end }
+            val dry = today.filter { it.first.bowl == Bowl.DRY }.sumOf { it.second.eaten }
+            val wet = today.filter { it.first.bowl == Bowl.WET }.sumOf { it.second.eaten }
+            val progress = goals.progress(dry, wet)
+            val wetColor = Color.rgb(163, 83, 36)
+            panel.addView(text("${percent(progress.total)} of daily food", 25f, ink, true))
+            val bar = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                background = shape(Color.rgb(226, 230, 225)); clipToOutline = true
+                contentDescription = "Daily food goal: dry ${percent(progress.dry)}, wet ${percent(progress.wet)}, total ${percent(progress.total)}"
+            }
+            listOf(progress.dryBar to green, progress.wetBar to wetColor,
+                progress.remainingBar to Color.rgb(226, 230, 225)).forEach { (fraction, color) ->
+                if (fraction > 0) bar.addView(View(this).apply { setBackgroundColor(color) },
+                    LinearLayout.LayoutParams(0, -1, fraction.toFloat()))
+            }
+            panel.addView(bar, LinearLayout.LayoutParams(-1, dp(24)).apply { topMargin = dp(8); bottomMargin = dp(8) })
+            panel.addView(text("Dry ${percent(progress.dry)} · ${Food.grams(dry)} / ${Food.grams(goals.dryMg)} g", 15f, green, true))
+            panel.addView(text("Wet ${percent(progress.wet)} · ${Food.grams(wet)} / ${Food.grams(goals.wetMg)} g", 15f, wetColor, true))
+            panel.addView(text(if (progress.total > 1) "${percent(progress.total - 1)} above goal. Full bar colors show the relative contributions."
+                else "${percent(1 - progress.total)} remaining to reach 100%", 14f, muted))
+        }
+        panel.addView(button(if (goals == null) "Set daily allowances" else "Edit daily allowances") { goalForm() })
+    }
+
+    private fun goalForm() {
+        val goals = store.goals()
+        val fields = column().apply { setPadding(dp(24), dp(8), dp(24), dp(16)) }
+        fields.addView(text("Enter the full daily amount for each food as if it were the only food eaten. These are not the portions of a mixed meal.", 15f, muted))
+        fun input(label: String, initial: Long?): EditText {
+            fields.addView(text(label, 16f, ink, true))
+            return EditText(this).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                hint = "g per day"; contentDescription = label; setSingleLine()
+                initial?.let { setText(Food.grams(it)) }
+                fields.addView(this, LinearLayout.LayoutParams(-1, dp(60)))
+            }
+        }
+        val dry = input("Dry food daily allowance (g)", goals?.dryMg)
+        val wet = input("Wet food daily allowance (g)", goals?.wetMg)
+        fields.addView(text("Example: 42 g of a 60 g dry allowance plus 60 g of a 200 g wet allowance = 70% + 30% = 100%.", 14f, muted))
+        val error = text("", 14f, Color.rgb(170, 50, 40)); fields.addView(error)
+        val dialog = AlertDialog.Builder(this).setTitle("Daily food allowances")
+            .setView(ScrollView(this).apply { addView(fields) }).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    store.saveGoals(FoodGoals(Food.parse(dry.text.toString()), Food.parse(wet.text.toString())))
+                    dialog.dismiss(); render()
+                } catch (e: IllegalArgumentException) { error.text = e.message }
+                catch (_: android.database.SQLException) { error.text = "Could not save the allowances. Please try again." }
+            }
+        }
+        dialog.show()
     }
     private fun weights() {
         val entries = store.weights().reversed()
@@ -267,7 +334,7 @@ class MainActivity : Activity() {
             input.use(Backup::read)
         }) { entries ->
             AlertDialog.Builder(this).setTitle("Replace all food and weight history?")
-                .setMessage("This backup contains ${entries.events.size} food entries and ${entries.weights.size} weight entries. Importing replaces ALL current food and weight history, including a log that is empty in the backup. Export a backup first if you want to keep your current records. This cannot be undone.")
+                .setMessage("This backup contains ${entries.events.size} food entries and ${entries.weights.size} weight entries. Importing replaces ALL current food and weight history and daily food allowances, including empty logs or unset goals. Export a backup first if you want to keep your current records. This cannot be undone.")
                 .setNegativeButton("Cancel", null).setPositiveButton("Replace and import") { _, _ ->
                     backupWork("Importing backup…", {
                         FoodStore(applicationContext).use { it.restore(entries) }

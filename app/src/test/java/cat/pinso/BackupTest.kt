@@ -12,7 +12,7 @@ class BackupTest {
         Event(5, Bowl.WET, Action.DISCARD, 103, measured = 10000))
     private val data = BackupData(entries, listOf(
         CatWeight(1, 100, WeightMethod.DIRECT, 4125, note = "Vet 🐈"),
-        CatWeight(2, 200, WeightMethod.DIFFERENCE, 74400, 70000)))
+        CatWeight(2, 200, WeightMethod.DIFFERENCE, 74400, 70000)), FoodGoals(60000, 200000))
     @Test fun roundTripPreservesAllFieldsAndBalances() {
         val restored = Backup.read(Backup.encode(data).byteInputStream())
         assertEquals(data, restored)
@@ -20,7 +20,8 @@ class BackupTest {
         assertEquals(listOf(4125L, 4400L), restored.weights.map { it.catGrams })
     }
     @Test fun emptyBackupIsValid() { val empty = BackupData(emptyList(), emptyList()); assertEquals(empty, Backup.decode(Backup.encode(empty))) }
-    @Test(expected = IllegalArgumentException::class) fun rejectOldVersion() { Backup.decode(Backup.encode(data).replace("\"version\": 2", "\"version\": 1")) }
+    @Test(expected = IllegalArgumentException::class) fun rejectOldVersion() { Backup.decode(Backup.encode(data).replace("\"version\": 3", "\"version\": 2")) }
+    @Test(expected = IllegalArgumentException::class) fun rejectZeroAllowance() { Backup.decode(Backup.encode(data).replace("60000", "0")) }
     @Test(expected = IllegalArgumentException::class) fun rejectDuplicateIds() { Backup.encode(data.copy(events = entries + entries.first())) }
     @Test(expected = IllegalArgumentException::class) fun rejectImpossibleHistory() { Backup.encode(data.copy(events = entries.drop(1))) }
     @Test(expected = IllegalArgumentException::class) fun rejectFractionalWeight() { Backup.decode(Backup.encode(data).replace("50125", "50125.5")) }

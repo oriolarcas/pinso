@@ -8,6 +8,12 @@ The main navigation has Food and Weight. Food contains Bowls, History, and Insig
 
 Weight supports direct entry in kilograms, or two readings: you holding the cat, and you without the cat. The app subtracts the latter from the former and retains both readings. Entries have editable timestamps and notes, can be edited or deleted, and are sorted chronologically. The latest measurement and change from the previous measurement appear above the history. Values are stored as integer grams (up to three decimal places in kilograms). Updating the installed app preserves existing food entries.
 
+## Daily food goals
+
+In **Food → Insights → Today**, choose **Set daily allowances**. Enter each food's full daily allowance in grams as if it were the only food. Both must be positive. There are no default recommendations.
+
+Progress is dry food eaten divided by the dry allowance, plus wet food eaten divided by the wet allowance. For example, 42/60 g dry and 60/200 g wet contribute 70% and 30%, reaching 100%. The stacked bar uses green for dry and orange for wet, with an empty remainder below 100%. Above 100%, the percentage remains uncapped and the full bar displays the relative contributions of the two foods. Only estimated consumption counts, attributed to the measurement date in the device's local timezone; added and discarded food do not count. Editing allowances immediately recalculates today's display.
+
 ## Build
 
 Install JDK 17 or newer, Android platform 37 and build tools 37.0.0. Set `sdk.dir` in your untracked `local.properties` (this laptop uses `/opt/android-sdk`).
@@ -34,4 +40,4 @@ Data is stored locally in SQLite, with no account, network permission, or automa
 
 Use **Backups** at the top of any screen to export a JSON file through Android's file picker, or import a previously exported file. Backups preserve both food bowls and cat weight history, including entry IDs, exact weights, original difference readings, timestamps, actions, and notes. You can choose local storage or a cloud document provider installed on your phone. Files are unencrypted.
 
-Import validates the file and recalculates its history before asking for confirmation. It **replaces**, rather than merges, all current food and weight entries, including when importing an empty log. Both logs are replaced in one database transaction: a failed restore rolls back to the previous data. Export before importing if you want to retain your current history. Format version 2 supports files up to 16 MB. Previous backup formats are deliberately unsupported; export a new backup after upgrading.
+Import validates the file and recalculates its history before asking for confirmation. It **replaces**, rather than merges, all current food and weight entries and daily food allowances, including empty logs or unset allowances. All are replaced in one database transaction: a failed restore rolls back to the previous data. Export before importing if you want to retain your current history. Format version 3 supports files up to 16 MB. Previous backup formats are deliberately unsupported; export a new backup after upgrading.

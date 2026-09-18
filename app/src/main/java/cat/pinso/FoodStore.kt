@@ -5,16 +5,28 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 2) {
+class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 3) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, bowl TEXT NOT NULL, action TEXT NOT NULL, time INTEGER NOT NULL, measured INTEGER NOT NULL, added INTEGER NOT NULL, note TEXT NOT NULL)")
         createWeights(db)
+        createGoals(db)
     }
     private fun createWeights(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE weights (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER NOT NULL, method TEXT NOT NULL, firstGrams INTEGER NOT NULL, personGrams INTEGER NOT NULL, note TEXT NOT NULL)")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createWeights(db)
+        if (oldVersion < 3) createGoals(db)
+    }
+    private fun createGoals(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE food_goals (id INTEGER PRIMARY KEY CHECK(id=1), dryMg INTEGER NOT NULL, wetMg INTEGER NOT NULL)")
+    }
+    fun goals(): FoodGoals? = readableDatabase.rawQuery("SELECT dryMg, wetMg FROM food_goals WHERE id=1", null).use {
+        if (it.moveToFirst()) FoodGoals(it.getLong(0), it.getLong(1)) else null
+    }
+    fun saveGoals(goals: FoodGoals) {
+        goals.validate()
+        writableDatabase.execSQL("INSERT OR REPLACE INTO food_goals(id,dryMg,wetMg) VALUES(1,?,?)", arrayOf(goals.dryMg, goals.wetMg))
     }
     fun weights(): List<CatWeight> = readableDatabase.rawQuery("SELECT * FROM weights ORDER BY time, id", null).use { c ->
         buildList { while (c.moveToNext()) add(CatWeight(c.getLong(0), c.getLong(1), WeightMethod.valueOf(c.getString(2)), c.getLong(3), c.getLong(4), c.getString(5))) }
@@ -32,7 +44,7 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
     fun backup(): BackupData {
         val db = writableDatabase
         db.beginTransaction()
-        try { return BackupData(events(), weights()).also { db.setTransactionSuccessful() } }
+        try { return BackupData(events(), weights(), goals()).also { db.setTransactionSuccessful() } }
         finally { db.endTransaction() }
     }
     fun events(): List<Event> = readableDatabase.rawQuery("SELECT * FROM events ORDER BY time, id", null).use { c ->
@@ -70,6 +82,8 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
         try {
             db.delete("events", null, null)
             db.delete("weights", null, null)
+            db.delete("food_goals", null, null)
+            data.foodGoals?.let { saveGoals(it) }
             data.events.forEach { event ->
                 db.insertOrThrow("events", null, ContentValues().apply {
                     put("id", event.id); put("bowl", event.bowl.name); put("action", event.action.name)
