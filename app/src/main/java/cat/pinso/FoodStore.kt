@@ -5,11 +5,36 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 1) {
+class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, bowl TEXT NOT NULL, action TEXT NOT NULL, time INTEGER NOT NULL, measured INTEGER NOT NULL, added INTEGER NOT NULL, note TEXT NOT NULL)")
+        createWeights(db)
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    private fun createWeights(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE weights (id INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER NOT NULL, method TEXT NOT NULL, firstGrams INTEGER NOT NULL, personGrams INTEGER NOT NULL, note TEXT NOT NULL)")
+    }
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createWeights(db)
+    }
+    fun weights(): List<CatWeight> = readableDatabase.rawQuery("SELECT * FROM weights ORDER BY time, id", null).use { c ->
+        buildList { while (c.moveToNext()) add(CatWeight(c.getLong(0), c.getLong(1), WeightMethod.valueOf(c.getString(2)), c.getLong(3), c.getLong(4), c.getString(5))) }
+    }
+    private fun weightValues(weight: CatWeight) = ContentValues().apply {
+        put("time", weight.time); put("method", weight.method.name); put("firstGrams", weight.firstGrams)
+        put("personGrams", weight.personGrams); put("note", weight.note)
+    }
+    fun saveWeight(weight: CatWeight) {
+        weight.validate()
+        if (weight.id == 0L) writableDatabase.insertOrThrow("weights", null, weightValues(weight))
+        else writableDatabase.update("weights", weightValues(weight), "id=?", arrayOf(weight.id.toString()))
+    }
+    fun deleteWeight(weight: CatWeight) { writableDatabase.delete("weights", "id=?", arrayOf(weight.id.toString())) }
+    fun backup(): BackupData {
+        val db = writableDatabase
+        db.beginTransaction()
+        try { return BackupData(events(), weights()).also { db.setTransactionSuccessful() } }
+        finally { db.endTransaction() }
+    }
     fun events(): List<Event> = readableDatabase.rawQuery("SELECT * FROM events ORDER BY time, id", null).use { c ->
         buildList { while (c.moveToNext()) add(Event(c.getLong(0), Bowl.valueOf(c.getString(1)), Action.valueOf(c.getString(2)), c.getLong(3), c.getLong(4), c.getLong(5), c.getString(6))) }
     }
@@ -38,18 +63,22 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
         } finally { db.endTransaction() }
     }
 
-    fun restore(events: List<Event>) {
-        Food.replay(events)
+    fun restore(data: BackupData) {
+        Backup.validate(data)
         val db = writableDatabase
         db.beginTransaction()
         try {
             db.delete("events", null, null)
-            events.forEach { event ->
+            db.delete("weights", null, null)
+            data.events.forEach { event ->
                 db.insertOrThrow("events", null, ContentValues().apply {
                     put("id", event.id); put("bowl", event.bowl.name); put("action", event.action.name)
                     put("time", event.time); put("measured", event.measured)
                     put("added", event.added); put("note", event.note)
                 })
+            }
+            data.weights.forEach { weight ->
+                db.insertOrThrow("weights", null, weightValues(weight).apply { put("id", weight.id) })
             }
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }

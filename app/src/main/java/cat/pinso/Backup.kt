@@ -8,21 +8,26 @@ import java.io.ByteArrayOutputStream
 object Backup {
     const val MAX_BYTES = 16 * 1024 * 1024
 
-    fun encode(events: List<Event>): String {
-        validate(events)
+    fun encode(data: BackupData): String {
+        validate(data)
         val array = JSONArray()
-        events.forEach { e ->
+        data.events.forEach { e ->
             array.put(JSONObject().put("id", e.id).put("bowl", e.bowl.name)
                 .put("action", e.action.name).put("timestamp", e.time)
                 .put("measuredMg", e.measured).put("addedMg", e.added).put("note", e.note))
         }
-        return JSONObject().put("format", "pinso-backup").put("version", 1)
-            .put("events", array).toString(2).also {
+        val weights = JSONArray()
+        data.weights.forEach { w ->
+            weights.put(JSONObject().put("id", w.id).put("timestamp", w.time).put("method", w.method.name)
+                .put("firstGrams", w.firstGrams).put("personGrams", w.personGrams).put("note", w.note))
+        }
+        return JSONObject().put("format", "pinso-backup").put("version", 2)
+            .put("events", array).put("weights", weights).toString(2).also {
                 require(it.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Backup exceeds the 16 MB limit." }
             }
     }
 
-    fun read(input: InputStream): List<Event> {
+    fun read(input: InputStream): BackupData {
         val buffer = ByteArray(8192)
         val output = ByteArrayOutputStream()
         while (true) {
@@ -35,20 +40,28 @@ object Backup {
         return decode(bytes.toString(Charsets.UTF_8))
     }
 
-    fun decode(json: String): List<Event> {
+    fun decode(json: String): BackupData {
         try {
             val root = JSONObject(json)
             require(root.getString("format") == "pinso-backup") { "This is not a Pinso backup." }
-            require(integer(root, "version") == 1L) { "This backup version is not supported." }
+            require(integer(root, "version") == 2L) { "This backup version is not supported. Export a new backup from the current app." }
             val array = root.getJSONArray("events")
-            return List(array.length()) { i ->
+            val events = List(array.length()) { i ->
                 val e = array.getJSONObject(i)
                 val note = e.get("note")
                 require(note is String) { "Invalid note." }
                 Event(integer(e, "id"), Bowl.valueOf(e.getString("bowl")),
                     Action.valueOf(e.getString("action")), integer(e, "timestamp"),
                     integer(e, "measuredMg"), integer(e, "addedMg"), note)
-            }.also(::validate)
+            }
+            val weights = root.getJSONArray("weights")
+            return BackupData(events, List(weights.length()) { i ->
+                val w = weights.getJSONObject(i)
+                val note = w.get("note")
+                require(note is String) { "Invalid note." }
+                CatWeight(integer(w, "id"), integer(w, "timestamp"), WeightMethod.valueOf(w.getString("method")),
+                    integer(w, "firstGrams"), integer(w, "personGrams"), note)
+            }).also(::validate)
         } catch (e: Exception) {
             throw IllegalArgumentException("Invalid backup: ${e.message ?: "unrecognized contents"}", e)
         }
@@ -60,7 +73,11 @@ object Backup {
         return (value as Number).toLong()
     }
 
-    private fun validate(events: List<Event>) {
+    fun validate(data: BackupData) {
+        val events = data.events
+        require(data.weights.all { it.id > 0 && it.id < Long.MAX_VALUE }) { "Invalid weight entry ID." }
+        require(data.weights.map { it.id }.toSet().size == data.weights.size) { "Duplicate weight entry IDs." }
+        data.weights.forEach { it.validate() }
         require(events.all { it.id > 0 && it.id < Long.MAX_VALUE && it.time >= 0 }) { "Invalid entry ID or timestamp." }
         require(events.map { it.id }.toSet().size == events.size) { "Duplicate entry IDs." }
         events.forEach {

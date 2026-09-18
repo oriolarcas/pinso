@@ -1,6 +1,12 @@
 # Pinso
 
-Offline Android cat-food tracker, with independent dry and wet bowls. Requires Android 8 or newer; targets Android 17 (API 37).
+Offline Android cat food and body-weight tracker. Requires Android 8 or newer; targets Android 17 (API 37).
+
+The main navigation has Food and Weight. Food contains Bowls, History, and Insights. Medicines is reserved for a future release and is not shown yet.
+
+## Cat weight
+
+Weight supports direct entry in kilograms, or two readings: you holding the cat, and you without the cat. The app subtracts the latter from the former and retains both readings. Entries have editable timestamps and notes, can be edited or deleted, and are sorted chronologically. The latest measurement and change from the previous measurement appear above the history. Values are stored as integer grams (up to three decimal places in kilograms). Updating the installed app preserves existing food entries.
 
 ## Build
 
@@ -26,6 +32,6 @@ Data is stored locally in SQLite, with no account, network permission, or automa
 
 ## Backups
 
-Use **Backups** at the top of any screen to export a JSON file through Android's file picker, or import a previously exported file. Backups preserve both bowls, entry IDs, exact weights, timestamps, actions, and notes. You can choose local storage or a cloud document provider installed on your phone. Files are unencrypted.
+Use **Backups** at the top of any screen to export a JSON file through Android's file picker, or import a previously exported file. Backups preserve both food bowls and cat weight history, including entry IDs, exact weights, original difference readings, timestamps, actions, and notes. You can choose local storage or a cloud document provider installed on your phone. Files are unencrypted.
 
-Import validates the file and recalculates its history before asking for confirmation. It **replaces**, rather than merges, all current entries, including when importing an empty backup. The database replacement is transactional: a failed restore rolls back to the previous data. Export before importing if you want to retain your current history. Format version 1 supports files up to 16 MB.
+Import validates the file and recalculates its history before asking for confirmation. It **replaces**, rather than merges, all current food and weight entries, including when importing an empty log. Both logs are replaced in one database transaction: a failed restore rolls back to the previous data. Export before importing if you want to retain your current history. Format version 2 supports files up to 16 MB. Previous backup formats are deliberately unsupported; export a new backup after upgrading.

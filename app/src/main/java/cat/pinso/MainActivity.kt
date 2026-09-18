@@ -21,6 +21,7 @@ class MainActivity : Activity() {
     private lateinit var store: FoodStore
     private lateinit var content: LinearLayout
     private var page = "Bowls"
+    private var section = "Food"
     private var filter: Bowl? = null
     private val ink = Color.rgb(35, 51, 42)
     private val muted = Color.rgb(97, 111, 102)
@@ -33,11 +34,13 @@ class MainActivity : Activity() {
         super.onCreate(state)
         store = FoodStore(this)
         page = state?.getString("page") ?: "Bowls"
+        section = state?.getString("section") ?: "Food"
         filter = state?.getString("filter")?.let(Bowl::valueOf)
         render()
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", page); outState.putString("filter", filter?.name)
+        outState.putString("section", section)
         super.onSaveInstanceState(outState)
     }
     override fun onDestroy() { backupProgress?.dismiss(); store.close(); super.onDestroy() }
@@ -71,14 +74,16 @@ class MainActivity : Activity() {
         }
         val header = column().apply { setPadding(dp(24), dp(12), dp(24), dp(8)) }
         horizontal(header, text("PINSO", 13f, green, true), button("Backups") { backups() })
-        header.addView(text(when(page) { "History" -> "Every little bite"; "Insights" -> "Food at a glance"; else -> "Your cat’s bowls" }, 30f, ink, true))
-        header.addView(text(when(page) { "History" -> "Measurements, meals, and fresh starts."; "Insights" -> "Separate bowls. A clearer picture."; else -> "A little care, one meal at a time." }, 15f, muted))
+        header.addView(text(if (section == "Weight") "Your cat’s weight" else when(page) { "History" -> "Every little bite"; "Insights" -> "Food at a glance"; else -> "Your cat’s bowls" }, 30f, ink, true))
+        if (section == "Food") horizontal(header, *listOf("Bowls", "History", "Insights").map { name ->
+            button(if (name == page) "• $name" else name) { page = name; render() }
+        }.toTypedArray())
         root.addView(header)
         content = column().apply { setPadding(dp(20), dp(12), dp(20), dp(12)) }
         root.addView(ScrollView(this).apply { isFillViewport = true; addView(content) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        when (page) { "History" -> history(); "Insights" -> insights(); else -> bowls() }
-        horizontal(root, *listOf("Bowls", "History", "Insights").map { name ->
-            button(if (name == page) "• $name" else name) { page = name; render() }
+        if (section == "Weight") weights() else when (page) { "History" -> history(); "Insights" -> insights(); else -> bowls() }
+        horizontal(root, *listOf("Food", "Weight").map { name ->
+            button(if (name == section) "• $name" else name) { section = name; render() }
         }.toTypedArray())
         setContentView(root)
         root.requestApplyInsets()
@@ -137,6 +142,99 @@ class MainActivity : Activity() {
         }
         content.addView(text("Consumption is an estimate from weight differences, recorded at measurement time. It may include spills or moisture loss, and may span more than one day.", 14f, muted))
     }
+    private fun weights() {
+        val entries = store.weights().reversed()
+        val summary = card(Color.rgb(230, 236, 244))
+        summary.addView(text("Latest measurement", 17f, muted))
+        summary.addView(text(entries.firstOrNull()?.let { "${Food.grams(it.catGrams)} kg" } ?: "No weight yet", 36f, ink, true))
+        entries.firstOrNull()?.let { summary.addView(text(date(it.time), 14f, muted)) }
+        if (entries.size >= 2) {
+            val change = entries[0].catGrams - entries[1].catGrams
+            summary.addView(text("${if (change > 0) "+" else ""}${Food.grams(change)} kg since previous measurement", 14f, muted))
+        }
+        horizontal(summary, button("Weigh directly") { weightForm(WeightMethod.DIRECT) },
+            button("By difference") { weightForm(WeightMethod.DIFFERENCE) })
+        content.addView(summary)
+        content.addView(text("Weight history", 22f, ink, true))
+        if (entries.isEmpty()) content.addView(text("Enter your cat’s weight, or weigh yourself holding the cat and then without the cat. All weights are in kilograms.", 16f, muted))
+        entries.forEach { entry ->
+            val panel = card()
+            panel.addView(text("${Food.grams(entry.catGrams)} kg", 26f, ink, true))
+            panel.addView(text(date(entry.time), 14f, muted))
+            panel.addView(text(if (entry.method == WeightMethod.DIRECT) "Direct measurement" else "By difference: ${Food.grams(entry.firstGrams)} − ${Food.grams(entry.personGrams)} kg", 15f, muted))
+            if (entry.note.isNotBlank()) panel.addView(text(entry.note, 15f))
+            horizontal(panel, button("Edit") { weightForm(entry.method, entry) }, button("Delete") {
+                AlertDialog.Builder(this).setTitle("Delete this weight entry?")
+                    .setMessage("${Food.grams(entry.catGrams)} kg · ${date(entry.time)}")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ ->
+                        try { store.deleteWeight(entry); render() }
+                        catch (_: android.database.SQLException) { problem("Could not delete the entry. Please try again.") }
+                    }.show()
+            })
+            content.addView(panel)
+        }
+    }
+
+    private fun weightForm(method: WeightMethod, existing: CatWeight? = null) {
+        var timestamp = existing?.time ?: System.currentTimeMillis()
+        val fields = column().apply { setPadding(dp(24), dp(8), dp(24), dp(16)) }
+        fun input(label: String, initial: Long?): EditText {
+            fields.addView(text(label, 16f, ink, true))
+            return EditText(this).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                hint = "kg"; contentDescription = label; textSize = 26f; setSingleLine()
+                initial?.let { setText(Food.grams(it)) }
+                fields.addView(this, LinearLayout.LayoutParams(-1, dp(60)))
+            }
+        }
+        val first = input(if (method == WeightMethod.DIRECT) "Cat’s weight (kg)" else "You holding the cat (kg)", existing?.firstGrams)
+        val person = if (method == WeightMethod.DIFFERENCE) input("You without the cat (kg)", existing?.personGrams) else null
+        val preview = text("", 18f, green, true)
+        fields.addView(preview)
+        lateinit var timeButton: Button
+        timeButton = button(date(timestamp)) {
+            val c = Calendar.getInstance().apply { timeInMillis = timestamp }
+            DatePickerDialog(this, { _, year, month, day ->
+                TimePickerDialog(this, { _, hour, minute ->
+                    c.set(year, month, day, hour, minute, 0); c.set(Calendar.MILLISECOND, 0)
+                    timestamp = c.timeInMillis; timeButton.text = date(timestamp)
+                }, c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), android.text.format.DateFormat.is24HourFormat(this)).show()
+            }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
+        }
+        fields.addView(text("When", 15f, ink, true)); fields.addView(timeButton)
+        val note = EditText(this).apply {
+            hint = "Note (optional)"; setText(existing?.note ?: "")
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        fields.addView(note)
+        fun entry() = CatWeight(existing?.id ?: 0, timestamp, method, parseKg(first.text.toString()),
+            person?.let { parseKg(it.text.toString()) } ?: 0, note.text.toString().trim()).also { it.validate() }
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun afterTextChanged(s: Editable?) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                try { preview.text = "Cat: ${Food.grams(entry().catGrams)} kg"; preview.setTextColor(green) }
+                catch (e: IllegalArgumentException) { preview.text = e.message }
+            }
+        }
+        first.addTextChangedListener(watcher); person?.addTextChangedListener(watcher)
+        val dialog = AlertDialog.Builder(this).setTitle(if (method == WeightMethod.DIRECT) "Weigh cat directly" else "Weigh by difference")
+            .setView(ScrollView(this).apply { addView(fields) }).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    require(timestamp <= System.currentTimeMillis()) { "Choose a time that is not in the future." }
+                    store.saveWeight(entry()); dialog.dismiss(); render()
+                } catch (e: IllegalArgumentException) { preview.text = e.message; preview.setTextColor(Color.rgb(170, 50, 40)) }
+                catch (_: android.database.SQLException) { preview.text = "Could not save. Please try again." }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun parseKg(value: String): Long = try { Food.parse(value) }
+        catch (e: IllegalArgumentException) { throw IllegalArgumentException(e.message?.replace("grams", "kilograms")?.replace("10,000 g", "500 kg")) }
+
     private fun date(time: Long) = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(java.util.Date(time))
     private fun problem(message: String) { AlertDialog.Builder(this).setTitle("Check this entry").setMessage(message).setPositiveButton("OK", null).show() }
     private fun backups() {
@@ -160,7 +258,7 @@ class MainActivity : Activity() {
         if (resultCode != RESULT_OK || requestCode !in listOf(101, 102)) return
         val uri = data?.data ?: return
         if (requestCode == 101) backupWork("Exporting backup…", {
-            val json = FoodStore(applicationContext).use { Backup.encode(it.events()) }
+            val json = FoodStore(applicationContext).use { Backup.encode(it.backup()) }
             val output = contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the selected file.")
             output.use { it.write(json.toByteArray(Charsets.UTF_8)) }
         }) { Toast.makeText(this, "Backup exported", Toast.LENGTH_LONG).show() }
@@ -168,12 +266,12 @@ class MainActivity : Activity() {
             val input = contentResolver.openInputStream(uri) ?: error("Cannot read the selected file.")
             input.use(Backup::read)
         }) { entries ->
-            AlertDialog.Builder(this).setTitle("Replace all food history?")
-                .setMessage("This backup contains ${entries.size} entries. Importing will replace all ${store.events().size} current entries in both bowls. Export a backup first if you want to keep them. This cannot be undone.")
+            AlertDialog.Builder(this).setTitle("Replace all food and weight history?")
+                .setMessage("This backup contains ${entries.events.size} food entries and ${entries.weights.size} weight entries. Importing replaces ALL current food and weight history, including a log that is empty in the backup. Export a backup first if you want to keep your current records. This cannot be undone.")
                 .setNegativeButton("Cancel", null).setPositiveButton("Replace and import") { _, _ ->
                     backupWork("Importing backup…", {
                         FoodStore(applicationContext).use { it.restore(entries) }
-                    }) { render(); Toast.makeText(this, "Imported ${entries.size} entries", Toast.LENGTH_LONG).show() }
+                    }) { render(); Toast.makeText(this, "Food and weight history imported", Toast.LENGTH_LONG).show() }
                 }.show()
         }
     }
