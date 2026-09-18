@@ -26,7 +26,7 @@ APK: `app/build/outputs/apk/debug/app-debug.apk`. Install with `adb install -r a
 
 ## Behavior
 
-- Add increases a bowl's recorded balance.
+- Add increases a bowl's recorded balance. An optional current bowl weight first records consumption, then adds the new food in the same entry. Blank means no measurement; explicit zero means the bowl is empty. No food is discarded by Add.
 - Weigh compares food found with the previous balance, recording the difference as estimated consumption.
 - Replace performs that comparison, discards the remainder, and records new food.
 - Throw away performs that comparison, discards the remainder, and leaves zero.
@@ -40,4 +40,4 @@ Data is stored locally in SQLite, with no account, network permission, or automa
 
 Use **Backups** at the top of any screen to export a JSON file through Android's file picker, or import a previously exported file. Backups preserve both food bowls and cat weight history, including entry IDs, exact weights, original difference readings, timestamps, actions, and notes. You can choose local storage or a cloud document provider installed on your phone. Files are unencrypted.
 
-Import validates the file and recalculates its history before asking for confirmation. It **replaces**, rather than merges, all current food and weight entries and daily food allowances, including empty logs or unset allowances. All are replaced in one database transaction: a failed restore rolls back to the previous data. Export before importing if you want to retain your current history. Format version 3 supports files up to 16 MB. Previous backup formats are deliberately unsupported; export a new backup after upgrading.
+Import validates the file and recalculates its history before asking for confirmation. It **replaces**, rather than merges, all current food and weight entries and daily food allowances, including empty logs or unset allowances. All are replaced in one database transaction: a failed restore rolls back to the previous data. Export before importing if you want to retain your current history. Format version 4 supports files up to 16 MB and preserves optional measurements on Add entries. Previous backup formats are deliberately unsupported; export a new backup after upgrading.

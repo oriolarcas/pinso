@@ -113,7 +113,7 @@ class MainActivity : Activity() {
             val panel = card()
             panel.addView(text("${event.action.title} · ${event.bowl.title}", 19f, ink, true))
             panel.addView(text(date(event.time), 13f, muted))
-            if (event.action != Action.ADD) panel.addView(text("Measured ${Food.grams(event.measured)} g · Eaten ≈ ${Food.grams(result.eaten)} g"))
+            if (event.hasMeasurement) panel.addView(text("Measured ${Food.grams(event.measured)} g · Eaten ≈ ${Food.grams(result.eaten)} g"))
             if (event.action == Action.ADD || event.action == Action.REPLACE) panel.addView(text("Added ${Food.grams(event.added)} g"))
             if (event.action == Action.REPLACE || event.action == Action.DISCARD) panel.addView(text("Discarded ${Food.grams(result.discarded)} g"))
             panel.addView(text("Bowl: ${Food.grams(result.before)} → ${Food.grams(result.after)} g", 15f, green, true))
@@ -326,7 +326,15 @@ class MainActivity : Activity() {
         val uri = data?.data ?: return
         if (requestCode == 101) backupWork("Exporting backup…", {
             val json = FoodStore(applicationContext).use { Backup.encode(it.backup()) }
-            val output = contentResolver.openOutputStream(uri, "wt") ?: error("Cannot open the selected file.")
+            val output = try {
+                contentResolver.openOutputStream(uri, "wt") ?: error("The storage provider could not open the new backup file.")
+            } catch (e: java.io.FileNotFoundException) {
+                throw java.io.IOException("Cannot write to this location. Try exporting to Downloads, then copy the backup to your preferred storage app. Provider: ${e.message}", e)
+            } catch (e: IllegalArgumentException) {
+                throw java.io.IOException("This storage provider does not support writing the backup. Try exporting to Downloads. Provider: ${e.message}", e)
+            } catch (e: UnsupportedOperationException) {
+                throw java.io.IOException("This storage provider only allows reading files here. Export to Downloads, then upload the backup using Proton Drive or your storage app. Provider: ${e.message}", e)
+            }
             output.use { it.write(json.toByteArray(Charsets.UTF_8)) }
         }) { Toast.makeText(this, "Backup exported", Toast.LENGTH_LONG).show() }
         else backupWork("Reading backup…", {
@@ -376,7 +384,9 @@ class MainActivity : Activity() {
                 fields.addView(this, LinearLayout.LayoutParams(-1, dp(60)))
             }
         }
-        val measured = if (action != Action.ADD) input("Amount found (g)", existing?.let { Food.grams(it.measured) } ?: "") else null
+        val measured = input(if (action == Action.ADD) "Amount currently in bowl (g, optional)" else "Amount found (g)",
+            existing?.takeIf { it.hasMeasurement }?.let { Food.grams(it.measured) } ?: "")
+        if (action == Action.ADD) fields.addView(text("Enter the amount before adding food to record what was eaten. Leave blank to add to the tracked amount; enter 0 if the bowl is empty.", 13f, muted))
         val added = if (action == Action.ADD || action == Action.REPLACE) input(if (action == Action.REPLACE) "New food (g)" else "Amount to add (g)", existing?.let { Food.grams(it.added) } ?: "") else null
         if (action == Action.REPLACE) fields.addView(text("The old remainder is discarded before adding the new food.", 13f, muted))
         val whenButton = button(date(timestamp)) {
@@ -394,7 +404,12 @@ class MainActivity : Activity() {
         val note = EditText(this).apply { hint = "Note (optional)"; setText(existing?.note ?: ""); inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES }
         fields.addView(note)
         val preview = text("", 14f, green); fields.addView(preview)
-        fun event() = Event(existing?.id ?: 0, bowl, action, timestamp, measured?.let { Food.parse(it.text.toString()) } ?: 0, added?.let { Food.parse(it.text.toString()) } ?: 0, note.text.toString().trim())
+        fun event(): Event {
+            val hasMeasurement = action != Action.ADD || measured.text.isNotBlank()
+            return Event(existing?.id ?: 0, bowl, action, timestamp,
+                if (hasMeasurement) Food.parse(measured.text.toString()) else 0,
+                added?.let { Food.parse(it.text.toString()) } ?: 0, note.text.toString().trim(), hasMeasurement)
+        }
         fun calculate(): Result {
             val candidate = event().copy(id = existing?.id ?: Long.MAX_VALUE)
             return Food.replay(store.events().filterNot { existing != null && it.id == existing.id } + candidate).first { it.first.id == candidate.id }.second
@@ -411,7 +426,7 @@ class MainActivity : Activity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { updatePreview() }
             override fun afterTextChanged(s: Editable?) = Unit
         }
-        measured?.addTextChangedListener(watcher); added?.addTextChangedListener(watcher)
+        measured.addTextChangedListener(watcher); added?.addTextChangedListener(watcher)
         refreshPreview = { updatePreview() }
         val dialog = AlertDialog.Builder(this).setTitle("${if (existing != null) "Edit · " else ""}${action.title}")
             .setView(ScrollView(this).apply { addView(fields) }).setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()

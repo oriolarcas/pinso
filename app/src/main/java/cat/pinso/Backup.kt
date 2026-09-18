@@ -14,7 +14,7 @@ object Backup {
         data.events.forEach { e ->
             array.put(JSONObject().put("id", e.id).put("bowl", e.bowl.name)
                 .put("action", e.action.name).put("timestamp", e.time)
-                .put("measuredMg", e.measured).put("addedMg", e.added).put("note", e.note))
+                .put("measuredMg", e.measured).put("addedMg", e.added).put("note", e.note).put("hasMeasurement", e.hasMeasurement))
         }
         val weights = JSONArray()
         data.weights.forEach { w ->
@@ -22,7 +22,7 @@ object Backup {
                 .put("firstGrams", w.firstGrams).put("personGrams", w.personGrams).put("note", w.note))
         }
         val goals = data.foodGoals?.let { JSONObject().put("dryMg", it.dryMg).put("wetMg", it.wetMg) }
-        return JSONObject().put("format", "pinso-backup").put("version", 3)
+        return JSONObject().put("format", "pinso-backup").put("version", 4)
             .put("foodGoals", goals ?: JSONObject.NULL)
             .put("events", array).put("weights", weights).toString(2).also {
                 require(it.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Backup exceeds the 16 MB limit." }
@@ -46,7 +46,7 @@ object Backup {
         try {
             val root = JSONObject(json)
             require(root.getString("format") == "pinso-backup") { "This is not a Pinso backup." }
-            require(integer(root, "version") == 3L) { "This backup version is not supported. Export a new backup from the current app." }
+            require(integer(root, "version") == 4L) { "This backup version is not supported. Export a new backup from the current app." }
             val goalObject = root.get("foodGoals")
             val goals = if (goalObject == JSONObject.NULL) null else {
                 require(goalObject is JSONObject) { "Invalid food goals." }
@@ -57,9 +57,11 @@ object Backup {
                 val e = array.getJSONObject(i)
                 val note = e.get("note")
                 require(note is String) { "Invalid note." }
+                val hasMeasurement = e.get("hasMeasurement")
+                require(hasMeasurement is Boolean) { "Invalid measurement flag." }
                 Event(integer(e, "id"), Bowl.valueOf(e.getString("bowl")),
                     Action.valueOf(e.getString("action")), integer(e, "timestamp"),
-                    integer(e, "measuredMg"), integer(e, "addedMg"), note)
+                    integer(e, "measuredMg"), integer(e, "addedMg"), note, hasMeasurement)
             }
             val weights = root.getJSONArray("weights")
             return BackupData(events, List(weights.length()) { i ->
@@ -90,7 +92,6 @@ object Backup {
         require(events.map { it.id }.toSet().size == events.size) { "Duplicate entry IDs." }
         events.forEach {
             require(it.measured in 0..10_000_000L && it.added in 0..10_000_000L) { "Invalid food weight." }
-            require(it.action != Action.ADD || it.measured == 0L) { "An addition cannot contain a measurement." }
             require(it.action !in listOf(Action.WEIGH, Action.DISCARD) || it.added == 0L) { "Unexpected added food." }
         }
         Food.replay(events)

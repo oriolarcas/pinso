@@ -5,9 +5,9 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 3) {
+class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 4) {
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, bowl TEXT NOT NULL, action TEXT NOT NULL, time INTEGER NOT NULL, measured INTEGER NOT NULL, added INTEGER NOT NULL, note TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, bowl TEXT NOT NULL, action TEXT NOT NULL, time INTEGER NOT NULL, measured INTEGER NOT NULL, added INTEGER NOT NULL, note TEXT NOT NULL, hasMeasurement INTEGER NOT NULL)")
         createWeights(db)
         createGoals(db)
     }
@@ -17,6 +17,10 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createWeights(db)
         if (oldVersion < 3) createGoals(db)
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE events ADD COLUMN hasMeasurement INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("UPDATE events SET hasMeasurement=1 WHERE action != 'ADD'")
+        }
     }
     private fun createGoals(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE food_goals (id INTEGER PRIMARY KEY CHECK(id=1), dryMg INTEGER NOT NULL, wetMg INTEGER NOT NULL)")
@@ -48,7 +52,7 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
         finally { db.endTransaction() }
     }
     fun events(): List<Event> = readableDatabase.rawQuery("SELECT * FROM events ORDER BY time, id", null).use { c ->
-        buildList { while (c.moveToNext()) add(Event(c.getLong(0), Bowl.valueOf(c.getString(1)), Action.valueOf(c.getString(2)), c.getLong(3), c.getLong(4), c.getLong(5), c.getString(6))) }
+        buildList { while (c.moveToNext()) add(Event(c.getLong(0), Bowl.valueOf(c.getString(1)), Action.valueOf(c.getString(2)), c.getLong(3), c.getLong(4), c.getLong(5), c.getString(6), c.getInt(7) != 0)) }
     }
     fun save(event: Event) {
         val db = writableDatabase
@@ -59,6 +63,7 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
             val values = ContentValues().apply {
                 put("bowl", event.bowl.name); put("action", event.action.name); put("time", event.time)
                 put("measured", event.measured); put("added", event.added); put("note", event.note)
+                put("hasMeasurement", event.hasMeasurement)
             }
             if (event.id == 0L) db.insertOrThrow("events", null, values)
             else db.update("events", values, "id=?", arrayOf(event.id.toString()))
@@ -89,6 +94,7 @@ class FoodStore(context: Context) : SQLiteOpenHelper(context, "pinso.db", null, 
                     put("id", event.id); put("bowl", event.bowl.name); put("action", event.action.name)
                     put("time", event.time); put("measured", event.measured)
                     put("added", event.added); put("note", event.note)
+                    put("hasMeasurement", event.hasMeasurement)
                 })
             }
             data.weights.forEach { weight ->

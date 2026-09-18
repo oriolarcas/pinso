@@ -20,7 +20,13 @@ class BackupTest {
         assertEquals(listOf(4125L, 4400L), restored.weights.map { it.catGrams })
     }
     @Test fun emptyBackupIsValid() { val empty = BackupData(emptyList(), emptyList()); assertEquals(empty, Backup.decode(Backup.encode(empty))) }
-    @Test(expected = IllegalArgumentException::class) fun rejectOldVersion() { Backup.decode(Backup.encode(data).replace("\"version\": 3", "\"version\": 2")) }
+    @Test(expected = IllegalArgumentException::class) fun rejectOldVersion() { Backup.decode(Backup.encode(data).replace("\"version\": 4", "\"version\": 3")) }
+    @Test fun measuredAdditionsRoundTripIncludingZero() {
+        val combined = data.copy(events = entries + listOf(
+            Event(6, Bowl.DRY, Action.ADD, 104, measured = 10000, added = 5000, hasMeasurement = true),
+            Event(7, Bowl.DRY, Action.ADD, 105, measured = 0, added = 5000, hasMeasurement = true)))
+        assertEquals(combined, Backup.decode(Backup.encode(combined)))
+    }
     @Test(expected = IllegalArgumentException::class) fun rejectZeroAllowance() { Backup.decode(Backup.encode(data).replace("60000", "0")) }
     @Test(expected = IllegalArgumentException::class) fun rejectDuplicateIds() { Backup.encode(data.copy(events = entries + entries.first())) }
     @Test(expected = IllegalArgumentException::class) fun rejectImpossibleHistory() { Backup.encode(data.copy(events = entries.drop(1))) }

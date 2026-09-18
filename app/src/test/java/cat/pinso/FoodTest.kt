@@ -4,6 +4,30 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FoodTest {
+    @Test fun addWithMeasurementMatchesWeighThenAdd() {
+        val combined = Event(bowl = Bowl.DRY, action = Action.ADD, time = 1, measured = 15000, added = 30000, hasMeasurement = true)
+        val result = Food.apply(40000, combined)
+        assertEquals(Result(40000, 45000, 25000, 0), result)
+        val weighed = Food.apply(40000, combined.copy(action = Action.WEIGH, added = 0))
+        val added = Food.apply(weighed.after, combined.copy(measured = 0, hasMeasurement = false))
+        assertEquals(added.after, result.after); assertEquals(weighed.eaten, result.eaten)
+    }
+    @Test fun blankAndZeroMeasurementsAreDifferent() {
+        val add = Event(bowl = Bowl.WET, action = Action.ADD, time = 1, added = 20000)
+        assertEquals(Result(40000, 60000, 0, 0), Food.apply(40000, add))
+        assertEquals(Result(40000, 20000, 40000, 0), Food.apply(40000, add.copy(hasMeasurement = true)))
+    }
+    @Test(expected = IllegalArgumentException::class) fun measuredAdditionRejectsIncrease() {
+        Food.apply(10000, Event(bowl = Bowl.DRY, action = Action.ADD, time = 1, measured = 20000, added = 10000, hasMeasurement = true))
+    }
+    @Test fun measuredAdditionReplaysAndCountsTowardGoal() {
+        val events = listOf(Event(1, Bowl.DRY, Action.ADD, 1, added = 60000),
+            Event(2, Bowl.DRY, Action.ADD, 2, measured = 30000, added = 20000, hasMeasurement = true),
+            Event(3, Bowl.DRY, Action.WEIGH, 3, measured = 20000))
+        val results = Food.replay(events)
+        assertEquals(60000L, results.sumOf { it.second.eaten })
+        assertEquals(1.0, FoodGoals(60000, 200000).progress(results.sumOf { it.second.eaten }, 0).total, 0.000001)
+    }
     private fun event(action: Action, measured: Long = 0, added: Long = 0, bowl: Bowl = Bowl.DRY, time: Long = 1) = Event(bowl = bowl, action = action, time = time, measured = measured, added = added)
     @Test fun mealCycleSeparatesConsumptionAndWaste() {
         val results = Food.replay(listOf(event(Action.ADD, added = 100000), event(Action.WEIGH, measured = 70000, time = 2), event(Action.REPLACE, measured = 20000, added = 85000, time = 3), event(Action.DISCARD, measured = 5000, time = 4)))
